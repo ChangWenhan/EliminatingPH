@@ -1,66 +1,66 @@
 # Eliminating Package Hallucination via Registry Verification and Substitution-Guided Repair
 
-让代码模型写的 Python 代码**不再编造不存在的包**。核心思路:模型写完后,用"两次自报依赖 + PyPI 注册表对账"找出它编造的包名,再让模型在真实包资料的引导下重写代码。在四个 Python 数据集上,把包幻觉率从 11.9%~20.7% 压到 ~0%,同时语法有效率全面上升。
+Make code LLMs stop inventing packages that do not exist. After the model writes code, we ask it twice which packages are needed, cross-check every name against the PyPI registry, and then guide the model to rewrite the code using real package evidence. Across four Python datasets, the hallucination rate drops from 11.9%–20.7% to ~0%, with syntax validity improving across the board.
 
-方法由两个组件构成,对应题目中的两个机制:
+The method consists of two components, mirroring the two mechanisms in the title:
 
-1. **Registry Verification(注册表验证)**:三通道提取包名(`pip install` 命令 + 两次向模型询问依赖)后,与 PyPI 注册表对账,判定真伪,并据此决定是否触发修复
-2. **Substitution-Guided Repair(替代引导修复)**:对每个幻觉包检索真实替代包,生成"幻觉包 → 真实包"替换映射,引导模型重写代码并重新验证
+1. **Registry Verification**: package names are extracted through three channels (`pip install` commands + two self-reported dependency queries), checked against the PyPI registry, and the result decides whether a repair is triggered
+2. **Substitution-Guided Repair**: for every hallucinated package, real alternative packages are retrieved; a "hallucinated → real" substitution map guides the model to rewrite the code, followed by re-verification
 
-修复触发条件:存在幻觉包 / 语法错误 / 出现 pip 安装命令 / 动态 import。基础修复变体(不提供替换映射,仅给真实包资料)用于消融对比。
+A repair is triggered when: a hallucinated package exists / syntax is invalid / a `pip install` command appears / a dynamic import is used. A base repair variant (real package context without a substitution map) serves as the ablation baseline.
 
-## 背景
+## Background
 
-代码模型在回答编程问题时经常推荐**并不存在的包**(包幻觉,package hallucination)。例如让模型解决一个报错问题,它会建议 `pip install find-libpython`,而 PyPI 上根本没有这个包。攻击者可以利用这一点发布同名恶意包,诱导用户安装(包混淆攻击)。
+Code LLMs frequently recommend **packages that do not exist** (package hallucination) when answering programming questions. For example, when asked to resolve an error, a model may suggest `pip install find-libpython` even though no such package exists on PyPI. An attacker could publish a malicious package under the same name and trick users into installing it (package confusion attack).
 
-- **评测口径**对齐 Spracklen et al.(USENIX Security 2025):三启发式提取包名(`pip install` 命令 + 两次向模型询问依赖)+ PyPI 全量包名对账,不在名单即幻觉。
-- **方法为本仓库原创**:原文的缓解手段(RAG、Self-Refinement、Fine-tuning)都不涉及"注册表裁决 + 替代包检索 + 代码重写修复"的闭环;其中的**替代包映射机制(Substitution-Guided Repair)是本工作的核心贡献**。
+- **Evaluation protocol** follows Spracklen et al. (USENIX Security 2025): three-heuristic package extraction (`pip install` commands + two dependency queries to the model) + matching against the full PyPI name list; a name not on the list is a hallucination.
+- **The method is original to this repository**: the mitigations in the original paper (RAG, Self-Refinement, Fine-tuning) do not involve the closed loop of registry adjudication + alternative retrieval + code rewriting repair. The **substitution map mechanism (Substitution-Guided Repair) is the core contribution**.
 
-## 方法
+## Method
 
-每个数据集(4 个)固定采样 500 条问题,每条在三个条件下各跑一遍。
+For each of the four datasets, 500 prompts are sampled with a fixed seed; every prompt runs under all three conditions.
 
-### 条件
+### Conditions
 
-| 条件(代码标识) | 内容 |
+| Condition (code id) | Description |
 |---|---|
-| `no_rag` | 基线。裸问模型,无检索、无修复 |
-| `vtrr` | 注册表验证 + 基础修复(检测 → 对账 → 检索真实包资料 → 重写 → 再验证) |
-| `vtrr_sub` | 注册表验证 + **替代引导修复**:为每个幻觉包检索真实替代包,把替换映射喂给模型修复 |
+| `no_rag` | Baseline. Direct query, no retrieval, no repair |
+| `vtrr` | Registry verification + base repair (detect → verify → retrieve real package context → rewrite → re-verify) |
+| `vtrr_sub` | Registry verification + **substitution-guided repair**: retrieve real alternatives for each hallucinated package and feed the substitution map to the model |
 
-### 单样本流程(以替代引导修复 `vtrr_sub` 为例)
+### Per-sample pipeline (substitution-guided repair, `vtrr_sub`)
 
 ```
-问题 ──► [LLM 写代码] ──► 代码/回答文本
+prompt ──► [LLM writes code] ──► code / answer text
               │
-              ├─► 问①"运行这段代码需要哪些包?" ──┐
-              ├─► 问②"解决这个问题需要哪些包?" ──┼──► 查 PyPI 名单对账
-              └─► 正则扫 pip install / import ──┘         │
-                                                          ▼
-                                               有幻觉?语法错?有 pip 命令?
-                                                           │ 是
-                                                           ▼
-                                 BM25 检索真实替代包(仅 sub 变体)──► 替换映射
-                                                          │
-                                                          ▼
-                   修复 prompt:原任务 + 代码 + 幻觉名单 + 真实包资料 (+ 替换映射)
-                                                          │
-                                                          ▼
-                                    [LLM 重写代码] ──► 重新对账验证
+              ├─► query 1 "Which packages to run this code?" ──┐
+              ├─► query 2 "Which packages to solve this task?" ─┼──► match against PyPI names
+              └─► regex scan pip install / import ──┘           │
+                                                               ▼
+                                    hallucinated? syntax error? pip command?
+                                                               │ yes
+                                                               ▼
+                          BM25 retrieve real alternatives (sub only) ──► substitution map
+                                                               │
+                                                               ▼
+            repair prompt: task + code + hallucinated list + real package context (+ map)
+                                                               │
+                                                               ▼
+                                    [LLM rewrites code] ──► re-verify
 ```
 
-关键设计:
+Key design decisions:
 
-1. **模型只管写,代码只管判**:所有真伪裁决来自 `pypi_package_names.csv`(PyPI 全量名单),模型没有自我判断权(区别于原文的 Self-Refinement)。
-2. **检索不是生成前 RAG**:检索只发生在检测到幻觉之后的修复阶段;初始生成与基线完全一致,不依赖 RAG 增强。
-3. **幻觉率只统计三通道**:问①幻觉 + 问②幻觉 + `pip install` 幻觉。代码里解析出的 import 仅用于触发修复和合法包兜底,不进入幻觉率分子分母。
-4. **名称归一化**:比对前将 `_`/`.`/`-` 统一为 `-` 并小写;标准库与人工维护的 false-positive 名单直接跳过(既不算 valid 也不算幻觉)。
+1. **The model writes, the code judges**: every validity decision comes from `pypi_package_names.csv` (the full PyPI name list); the model has no self-adjudication power (unlike Self-Refinement in the original paper).
+2. **Retrieval is not pre-generation RAG**: retrieval happens only in the repair stage after a hallucination is detected; the initial generation is identical to the baseline and does not rely on RAG augmentation.
+3. **Hallucination rate counts three channels only**: query-1 hallucinations + query-2 hallucinations + `pip install` hallucinations. Imports parsed from the code are used only to trigger repair and to backfill valid packages; they never enter the hallucination-rate numerator or denominator.
+4. **Name normalization**: before matching, `_`/`.`/`-` are unified to `-` and lowercased; stdlib modules and a hand-curated false-positive list are skipped entirely (counted as neither valid nor hallucinated).
 
-## 结果
+## Results
 
-Qwen2.5-Coder-7B-Instruct,每条件 n=500(数据见 `results/vtrr_full_*`)。
+Qwen2.5-Coder-7B-Instruct, n=500 per condition (data under `results/vtrr_full_*`).
 
-| 数据集 | 条件 | 幻觉率 | 幻觉包/总包 | 语法有效率 | 修复触发 |
+| Dataset | Condition | Hallucination rate | Hallucinated/total | Syntax validity | Repairs triggered |
 |---|---|---|---|---|---|
 | LLM_AT | no_rag | 11.86% | 133/1121 | 97.2% | — |
 | LLM_AT | vtrr | **0.00%** | 0/1152 | 98.4% | 52 |
@@ -75,31 +75,31 @@ Qwen2.5-Coder-7B-Instruct,每条件 n=500(数据见 `results/vtrr_full_*`)。
 | SO_LY | vtrr | **0.00%** | 0/567 | 86.4% | 254 |
 | SO_LY | vtrr_sub | **0.00%** | 0/597 | 87.0% | 261 |
 
-观察:
+Observations:
 
-- **包幻觉完全消除**:替代引导修复(`vtrr_sub`)在四个数据集上幻觉率全部为 0。
-- **语法有效率同步提升**:修复机制以"语法错误"为触发条件之一,修复过程顺带重写了不合法代码;SO 类数据集提升尤其明显(53.4% → 87.0%)。
-- **残余语法错误归因于基座模型**:残留失败均为模型生成问题(答错语言、截断、普通语法错误),与包名无关——包幻觉被消除后,代码质量受限于代码模型本身。
+- **Package hallucination is fully eliminated**: substitution-guided repair (`vtrr_sub`) reaches a 0.00% hallucination rate on all four datasets.
+- **Syntax validity improves alongside**: invalid syntax is one of the repair triggers, so the repair pass rewrites malformed code too; the gain is largest on the SO datasets (53.4% → 87.0%).
+- **Residual syntax errors are attributable to the base model**: remaining failures are all model-generation issues (wrong language answers, truncation, ordinary syntax mistakes) unrelated to package names — once hallucination is eliminated, code quality is bounded by the code model itself.
 
-## 仓库结构
+## Repository layout
 
 ```
-vtrr_alignment/          核心实现
-  run_four_conditions.py 实验入口(6 个条件,含 rag_no_attack / spracks_attack)
-  metrics.py             三通道提取、注册表对账、代码依赖检查、幻觉率
-  retrieval.py           自实现 BM25 检索器、替代包检索
-  llm.py                 OpenAI 兼容 API 客户端
-Data/Python/             4 个数据集 + pypi_package_names.csv + false_positive_packages.csv
-Mitigation/Data/         检索语料(RAG_data.jsonl,49920 条包-问题描述)
-results/vtrr_full_*/     实验结果(summary.csv / rows.csv)
-tests/                   指标单元测试
+vtrr_alignment/          core implementation
+  run_four_conditions.py experiment entry (6 conditions incl. rag_no_attack / spracks_attack)
+  metrics.py             three-channel extraction, registry matching, code dependency checks, rate
+  retrieval.py           self-implemented BM25 retriever, alternative retrieval
+  llm.py                 OpenAI-compatible API client
+Data/Python/             4 datasets + pypi_package_names.csv + false_positive_packages.csv
+Mitigation/Data/         retrieval corpus (RAG_data.jsonl, 49,920 package-question descriptions)
+results/vtrr_full_*/     experimental results (summary.csv / rows.csv)
+tests/                   metric unit tests
 ```
 
-## 复现
+## Reproduction
 
-1. 用 vLLM(或其他 OpenAI 兼容服务)部署模型,如 `Qwen/Qwen2.5-Coder-7B-Instruct`。
-2. 安装依赖:`pip install -r requirements.txt`。
-3. 跑单个数据集、单个条件:
+1. Serve a model with vLLM (or any OpenAI-compatible endpoint), e.g. `Qwen/Qwen2.5-Coder-7B-Instruct`.
+2. Install dependencies: `pip install -r requirements.txt`.
+3. Run a single dataset and condition set:
 
 ```bash
 python -m vtrr_alignment.run_four_conditions \
@@ -111,22 +111,22 @@ python -m vtrr_alignment.run_four_conditions \
   --limit 500 --seed 0
 ```
 
-4. 输出:`<output-dir>/<condition>/rows.csv`(逐条结果)+ `summary.csv`(聚合:幻觉率、语法有效率、修复次数等)。
+4. Output: `<output-dir>/<condition>/rows.csv` (per-prompt results) + `summary.csv` (aggregates: hallucination rate, syntax validity, repair counts, etc.).
 
-常用参数:温度(代码 0.7 / 包名 0.01)、top-k 检索 5、max-prompt-chars 6000、`--workers` 并行数。`--dry-run` 可无模型冒烟测试。
+Notable flags: temperatures (code 0.7 / package 0.01), retrieval top-k 5, `--max-prompt-chars 6000`, `--workers` for parallelism. `--dry-run` smoke-tests the pipeline without a model.
 
-## 数据集
+## Datasets
 
-来自 Spracklen et al. 的 Python 子集,按 2×2 划分:
+Python subset of Spracklen et al., organized in a 2×2 split:
 
-| 数据集 | 条数 | 内容 |
+| Dataset | Size | Content |
 |---|---|---|
-| LLM_AT / LLM_LY | 4922 / 4892 | LLM 生成的"写 Python 代码"指令;LY 为 2023 年后生成(涉及较新包) |
-| SO_AT / SO_LY | 4640 / 4630 | StackOverflow 问答帖(Title+Body);LY 为 2023 年帖子 |
+| LLM_AT / LLM_LY | 4922 / 4892 | LLM-generated "write Python code" instructions; LY generated after 2023 (newer packages) |
+| SO_AT / SO_LY | 4640 / 4630 | StackOverflow Q&A posts (Title+Body); LY posts from 2023 |
 
-注意:SO 数据集不全是"写代码"任务,还有概念解释、报错排查、环境配置等;模型可能答成 bash/其他语言,评测统一按"代码 + import + pip 命令"三通道对账,纯解释回答不构成幻觉。
+Note: the SO datasets are not all code-writing tasks — they also include concept explanations, error debugging, and environment setup questions; the model may answer with bash or other languages. Evaluation uniformly verifies the three channels (code + import + `pip install`); pure explanatory answers do not count as hallucinations.
 
-## 已知边界
+## Known limitations
 
-- 语法有效性只反映"能解析",不评估运行正确性(原文用 HumanEval pass@1,本仓库未含)。
-- 注册表快照口径:幻觉率以 `pypi_package_names.csv` 为事实表,若名单被污染,结果为幻觉率下界(与原文一致)。
+- Syntax validity only reflects parseability, not runtime correctness (the original paper used HumanEval pass@1, which is not included in this repository).
+- Registry snapshot semantics: hallucination rate uses `pypi_package_names.csv` as ground truth; if the list is contaminated, the rate is a lower bound (consistent with the original paper).
