@@ -28,26 +28,34 @@ For each of the four datasets, 500 prompts are sampled with a fixed seed; every 
 | `registry_repair` | Registry verification + base repair (detect → verify → retrieve real package context → rewrite → re-verify) |
 | `substitution_repair` | Registry verification + **substitution-guided repair**: retrieve real alternatives for each hallucinated package and feed the substitution map to the model |
 
-### Per-sample pipeline (substitution-guided repair, `substitution_repair`)
+### Pipeline of the two repair methods
+
+Both methods share the front half: (1) the LLM writes code with no retrieval, (2) two dependency queries (one on the code, one on the prompt), (3) three-channel registry verification (query-1 + query-2 + `pip install` scan of the answer text, with an auxiliary import check), and (4) a repair trigger decision (hallucinated package / syntax error / `pip install` command / dynamic import). They differ in what the repair does:
+
+**`registry_repair` — registry verification + base repair**
 
 ```
-prompt ──► [LLM writes code] ──► code / answer text
-              │
-              ├─► query 1 "Which packages to run this code?" ──┐
-              ├─► query 2 "Which packages to solve this task?" ─┼──► match against PyPI names
-              └─► regex scan pip install / import ──┘           │
-                                                               ▼
-                                    hallucinated? syntax error? pip command?
-                                                               │ yes
-                                                               ▼
-                          BM25 retrieve real alternatives (sub only) ──► substitution map
-                                                               │
-                                                               ▼
-            repair prompt: task + code + hallucinated list + real package context (+ map)
-                                                               │
-                                                               ▼
-                                    [LLM rewrites code] ──► re-verify
+⑤ filter: q1/q2 answers keep only registry-validated packages (drop hallucinated ones)
+⑥ retrieve: BM25 real package context (full_context)
+⑦ repair: prompt = task + code + hallucinated list + real package context
+          → LLM rewrites the code
+⑧ re-verify: re-check imports, re-query dependencies, re-match against the registry
 ```
+
+**`substitution_repair` — substitution-guided repair**
+
+```
+⑤ alternative retrieval: for each hallucinated package, BM25 retrieves real
+   alternatives → build "hallucinated → alternative" substitution map
+⑥ substitute: q1/q2 answers keep valid packages, replace hallucinated ones
+   with the top-1 alternative
+⑦ repair: prompt = task + code + hallucinated list + real package context
+          + substitution guide (replace X with Y) → LLM rewrites the code
+⑧ re-verify + safety net: residual hallucinated imports are re-retrieved for
+   alternatives, q1/q2 are re-built by substitution, then re-matched
+```
+
+The difference in one sentence: `registry_repair` tells the model which packages are fake and provides real package evidence, leaving the replacement to the model itself; `substitution_repair` additionally tells the model exactly which real package to use instead, and applies a post-repair substitution safety net. This is why it yields more valid packages (597 vs 567 on SO_LY) and a lower raw hallucination rate (9.14% vs 14.39%).
 
 Key design decisions:
 
