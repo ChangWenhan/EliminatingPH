@@ -1,0 +1,4 @@
+condition,input,outputs,valid_packages,hallucinated_packages,total_packages,hallucination_rate,raw_valid_packages,raw_hallucinated_packages,raw_total_packages,raw_hallucination_rate,repair_triggered,attack_candidate_packages
+no_rag,Data/Python/SO_LY.json,500,356,93,449,0.20712695,356,93,449,0.20712695,0,0
+registry_repair,Data/Python/SO_LY.json,500,567,0,567,0.00000000,470,79,549,0.14389800,254,0
+substitution_repair,Data/Python/SO_LY.json,500,597,0,597,0.00000000,487,49,536,0.09141791,261,0

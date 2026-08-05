@@ -1,4 +1,0 @@
-condition,input,outputs,valid_packages,hallucinated_packages,total_packages,hallucination_rate,raw_valid_packages,raw_hallucinated_packages,raw_total_packages,raw_hallucination_rate,repair_triggered,attack_candidate_packages
-no_rag,Data/Python/LLM_LY.json,500,1270,227,1497,0.15163661,1270,227,1497,0.15163661,0,0
-vtrr,Data/Python/LLM_LY.json,500,1423,0,1423,0.00000000,1260,188,1448,0.12983425,97,0
-vtrr_sub,Data/Python/LLM_LY.json,500,1485,0,1485,0.00000000,1344,170,1514,0.11228534,172,0

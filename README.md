@@ -25,10 +25,10 @@ For each of the four datasets, 500 prompts are sampled with a fixed seed; every 
 | Condition (code id) | Description |
 |---|---|
 | `no_rag` | Baseline. Direct query, no retrieval, no repair |
-| `vtrr` | Registry verification + base repair (detect → verify → retrieve real package context → rewrite → re-verify) |
-| `vtrr_sub` | Registry verification + **substitution-guided repair**: retrieve real alternatives for each hallucinated package and feed the substitution map to the model |
+| `registry_repair` | Registry verification + base repair (detect → verify → retrieve real package context → rewrite → re-verify) |
+| `substitution_repair` | Registry verification + **substitution-guided repair**: retrieve real alternatives for each hallucinated package and feed the substitution map to the model |
 
-### Per-sample pipeline (substitution-guided repair, `vtrr_sub`)
+### Per-sample pipeline (substitution-guided repair, `substitution_repair`)
 
 ```
 prompt ──► [LLM writes code] ──► code / answer text
@@ -58,40 +58,40 @@ Key design decisions:
 
 ## Results
 
-Qwen2.5-Coder-7B-Instruct, n=500 per condition (data under `results/vtrr_full_*`).
+Qwen2.5-Coder-7B-Instruct, n=500 per condition (data under `results/registry_repair_full_*`).
 
 | Dataset | Condition | Hallucination rate | Hallucinated/total | Syntax validity | Repairs triggered |
 |---|---|---|---|---|---|
 | LLM_AT | no_rag | 11.86% | 133/1121 | 97.2% | — |
-| LLM_AT | vtrr | **0.00%** | 0/1152 | 98.4% | 52 |
-| LLM_AT | vtrr_sub | **0.00%** | 0/1157 | 97.8% | 114 |
+| LLM_AT | registry_repair | **0.00%** | 0/1152 | 98.4% | 52 |
+| LLM_AT | substitution_repair | **0.00%** | 0/1157 | 97.8% | 114 |
 | LLM_LY | no_rag | 15.16% | 227/1497 | 95.4% | — |
-| LLM_LY | vtrr | **0.00%** | 0/1423 | 97.6% | 97 |
-| LLM_LY | vtrr_sub | **0.00%** | 0/1485 | 96.0% | 172 |
+| LLM_LY | registry_repair | **0.00%** | 0/1423 | 97.6% | 97 |
+| LLM_LY | substitution_repair | **0.00%** | 0/1485 | 96.0% | 172 |
 | SO_AT | no_rag | 20.71% | 99/478 | 75.8% | — |
-| SO_AT | vtrr | **0.00%** | 0/452 | 94.6% | 132 |
-| SO_AT | vtrr_sub | **0.00%** | 0/536 | 95.0% | 174 |
+| SO_AT | registry_repair | **0.00%** | 0/452 | 94.6% | 132 |
+| SO_AT | substitution_repair | **0.00%** | 0/536 | 95.0% | 174 |
 | SO_LY | no_rag | 20.71% | 93/449 | 53.4% | — |
-| SO_LY | vtrr | **0.00%** | 0/567 | 86.4% | 254 |
-| SO_LY | vtrr_sub | **0.00%** | 0/597 | 87.0% | 261 |
+| SO_LY | registry_repair | **0.00%** | 0/567 | 86.4% | 254 |
+| SO_LY | substitution_repair | **0.00%** | 0/597 | 87.0% | 261 |
 
 Observations:
 
-- **Package hallucination is fully eliminated**: substitution-guided repair (`vtrr_sub`) reaches a 0.00% hallucination rate on all four datasets.
+- **Package hallucination is fully eliminated**: substitution-guided repair (`substitution_repair`) reaches a 0.00% hallucination rate on all four datasets.
 - **Syntax validity improves alongside**: invalid syntax is one of the repair triggers, so the repair pass rewrites malformed code too; the gain is largest on the SO datasets (53.4% → 87.0%).
 - **Residual syntax errors are attributable to the base model**: remaining failures are all model-generation issues (wrong language answers, truncation, ordinary syntax mistakes) unrelated to package names — once hallucination is eliminated, code quality is bounded by the code model itself.
 
 ## Repository layout
 
 ```
-vtrr_alignment/          core implementation
+registry_repair_alignment/          core implementation
   run_four_conditions.py experiment entry (6 conditions incl. rag_no_attack / spracks_attack)
   metrics.py             three-channel extraction, registry matching, code dependency checks, rate
   retrieval.py           self-implemented BM25 retriever, alternative retrieval
   llm.py                 OpenAI-compatible API client
 Data/Python/             4 datasets + pypi_package_names.csv + false_positive_packages.csv
 Mitigation/Data/         retrieval corpus (RAG_data.jsonl, 49,920 package-question descriptions)
-results/vtrr_full_*/     experimental results (summary.csv / rows.csv)
+results/registry_repair_full_*/     experimental results (summary.csv / rows.csv)
 tests/                   metric unit tests
 ```
 
@@ -102,10 +102,10 @@ tests/                   metric unit tests
 3. Run a single dataset and condition set:
 
 ```bash
-python -m vtrr_alignment.run_four_conditions \
+python -m registry_repair_alignment.run_four_conditions \
   --input Data/Python/SO_LY.json \
-  --conditions no_rag vtrr vtrr_sub \
-  --output-dir results/vtrr_full_SO_LY \
+  --conditions no_rag registry_repair substitution_repair \
+  --output-dir results/registry_repair_full_SO_LY \
   --api-base http://127.0.0.1:8000/v1 \
   --model Qwen2.5-Coder-7B-Instruct \
   --limit 500 --seed 0

@@ -1,0 +1,4 @@
+condition,input,outputs,valid_packages,hallucinated_packages,total_packages,hallucination_rate,raw_valid_packages,raw_hallucinated_packages,raw_total_packages,raw_hallucination_rate,repair_triggered,attack_candidate_packages
+no_rag,Data/Python/LLM_AT.json,500,988,133,1121,0.11864407,988,133,1121,0.11864407,0,0
+registry_repair,Data/Python/LLM_AT.json,500,1152,0,1152,0.00000000,996,108,1104,0.09782609,52,0
+substitution_repair,Data/Python/LLM_AT.json,500,1157,0,1157,0.00000000,1040,67,1107,0.06052394,114,0
