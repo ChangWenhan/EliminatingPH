@@ -1,0 +1,4 @@
+condition,input,outputs,valid_packages,hallucinated_packages,total_packages,hallucination_rate,raw_valid_packages,raw_hallucinated_packages,raw_total_packages,raw_hallucination_rate,repair_triggered,attack_candidate_packages
+no_rag,Data/Python/SO_AT.json,500,379,99,478,0.20711297,379,99,478,0.20711297,0,0
+vtrr,Data/Python/SO_AT.json,500,452,0,452,0.00000000,412,92,504,0.18253968,132,0
+vtrr_sub,Data/Python/SO_AT.json,500,536,0,536,0.00000000,471,79,550,0.14363636,174,0
